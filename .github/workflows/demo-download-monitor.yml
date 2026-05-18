@@ -1,0 +1,108 @@
+name: Demo download monitor
+
+# Watches the free-demo release assets (Windows installer + Docker eval bundle)
+# and opens a GitHub issue whenever the total download count increases.
+# The issue is authored by github-actions[bot], so repo watchers — including the
+# owner — receive GitHub's native notification email.
+
+on:
+  schedule:
+    - cron: '0 * * * *'   # hourly, on the hour (UTC)
+  workflow_dispatch: {}    # manual trigger (used for testing)
+
+permissions:
+  contents: write   # commit the state file back to the repo
+  issues: write     # open alert issues
+
+concurrency:
+  group: demo-download-monitor
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check download counts and alert on increase
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          STATE_FILE=".github/demo-download-state.json"
+
+          # --- current counts (GITHUB_TOKEN can see this repo's draft releases) ---
+          releases=$(gh api "repos/$REPO/releases" --paginate --jq '.[]')
+          current=$(jq -s '{
+            total: ([.[].assets[].download_count] | add // 0),
+            assets: ([.[] | .tag_name as $t | .assets[]
+                      | {key: ($t + "::" + .name), value: .download_count}] | from_entries)
+          }' <<<"$releases")
+          currentTotal=$(jq '.total' <<<"$current")
+
+          # --- prior state ---
+          if [ -f "$STATE_FILE" ]; then
+            priorTotal=$(jq '.total // 0' "$STATE_FILE")
+            priorAssets=$(jq -c '.assets // {}' "$STATE_FILE")
+          else
+            priorTotal=0
+            priorAssets='{}'
+          fi
+          echo "priorTotal=$priorTotal  currentTotal=$currentTotal"
+
+          # --- alert on increase ---
+          if [ "$currentTotal" -gt "$priorTotal" ]; then
+            delta=$(( currentTotal - priorTotal ))
+            now=$(date -u +"%Y-%m-%d %H:%M UTC")
+
+            rows=$(jq -r --argjson prior "$priorAssets" '
+              .assets | to_entries
+              | map(.prev = ($prior[.key] // 0))
+              | map(select(.value > .prev))
+              | sort_by(-(.value - .prev))
+              | .[]
+              | "| `\(.key)` | \(if (.key|endswith(".exe")) then "Windows"
+                                  elif (.key|endswith(".tar.gz")) then "Docker"
+                                  else "other" end) | \(.prev) | \(.value) | +\(.value - .prev) |"
+            ' <<<"$current")
+
+            {
+              echo "**$delta** new demo download(s) detected since the last check."
+              echo
+              echo "| Asset | Type | Previous | Now | Delta |"
+              echo "|---|---|---|---|---|"
+              echo "$rows"
+              echo
+              echo "New total across all release assets: **$currentTotal**"
+              echo
+              echo "_Checked $now - automated by \`.github/workflows/demo-download-monitor.yml\`._"
+            } > /tmp/issue-body.md
+
+            gh label create download-alert --color 0E8A16 \
+              --description "Demo download notification" --force || true
+            gh issue create \
+              --title "Demo downloads: +$delta since last check (total $currentTotal)" \
+              --body-file /tmp/issue-body.md \
+              --label download-alert \
+              --assignee TroyCoderBoy
+          elif [ "$currentTotal" -lt "$priorTotal" ]; then
+            echo "Count decreased ($priorTotal -> $currentTotal) - refreshing baseline, no issue."
+          else
+            echo "No change ($currentTotal)."
+          fi
+
+          # --- persist state (commits only when the file actually changes) ---
+          jq -n --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                --argjson total "$currentTotal" \
+                --argjson assets "$(jq -c '.assets' <<<"$current")" \
+                '{updated: $ts, total: $total, assets: $assets}' > "$STATE_FILE"
+
+          if ! git diff --quiet -- "$STATE_FILE"; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add "$STATE_FILE"
+            git commit -m "chore: update demo-download tracker state [skip ci]"
+            git push
+          fi
