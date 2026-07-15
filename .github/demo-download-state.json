@@ -1,6 +1,6 @@
 {
-  "updated": "2026-07-15T05:27:10Z",
-  "total": 33,
+  "updated": "2026-07-15T08:02:51Z",
+  "total": 34,
   "assets": {
     "v0.85.0::pulp-engine-eval-0.85.0.tar.gz": 3,
     "v0.85.0::pulp-engine-eval-latest.tar.gz": 4,
@@ -17,7 +17,7 @@
     "v0.79.0::pulp-engine-eval-0.79.0.tar.gz": 4,
     "v0.79.0::PulpEngine-Setup-0.79.0.exe": 2,
     "v0.78.6::pulp-engine-eval-0.78.6.tar.gz": 3,
-    "v0.78.6::PulpEngine-Setup-0.78.6.exe": 1,
+    "v0.78.6::PulpEngine-Setup-0.78.6.exe": 2,
     "v0.78.4::pulp-engine-eval-0.78.4.tar.gz": 1,
     "v0.78.4::PulpEngine-Setup-0.78.4.exe": 0,
     "v0.78.3::pulp-engine-eval-0.78.3.tar.gz": 1,
